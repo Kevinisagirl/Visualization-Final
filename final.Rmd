@@ -38,7 +38,7 @@ diseases$percentpop <- diseases$normalized.count/diseases$population
   
 The diseases recorded in this dataset reveal total reported disease counts have gone down in the United States. 
   
-```{r fig.align="center", fig.width=8, fig.height=4}
+```{r fig.align="center", fig.width=12, fig.height=4}
 alldiseases <- diseases %>%
   group_by(year) %>%
   summarize(total = sum(count, na.rm = TRUE))
@@ -51,7 +51,7 @@ ggplot(na.omit(alldiseases), aes(x=year, y=total)) + geom_point(shape=21, color=
 This trend is seen for every disease in the dataset.
 
 
-```{r, fig.width=8, fig.height=4, fig.align="center"}
+```{r, fig.width=12, fig.height=4, fig.align="center"}
 diseasesbyyear <- na.omit(diseases) %>%
   group_by(disease,year) %>%
   summarize(totalcount = sum(normalized.count, na.rm = TRUE))
