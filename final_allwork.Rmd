@@ -1,0 +1,418 @@
+---
+title: "Data Visualization Final"
+output: html_notebook
+---
+
+```{r}
+library(dslabs)
+library(ggplot2)
+library(dplyr)
+library(segmented)
+library(gridExtra)
+diseases <- get("us_contagious_diseases")
+murders <- get("murders")
+diseases
+murders
+summary(diseases)
+```
+Are these reported new cases or all cases?
+
+Replace 0's with NA's
+Delete Polio Data
+```{r}
+diseases[diseases$weeks_reporting == 0, c("weeks_reporting", "count")] <- NA
+diseases <- diseases[which(diseases$disease != "Polio"),]
+diseases$disease <- factor(diseases$disease)
+```
+
+Were weeks that were not reported 0 cases or can we assume that the average reported week applied to each week:
+```{r}
+Measles <- (diseases[which(diseases$disease == "Measles"),2:ncol(diseases)])
+str(Measles)
+plot(count ~ year, data=Measles[which(Measles$state == "Alaska"),])
+# this is nice because it gets rid of not reported years
+# but it doesn't seem to change the overall trend so that's good
+Measles$normalized.count <- Measles$count / Measles$weeks_reporting * 52
+str(Measles)
+plot(normalized.count ~ year, data=Measles[which(Measles$state == "Alaska"),])
+```
+
+What about the country?
+```{r}
+plot(normalized.count ~ year, data=Measles)
+# need to normalize by population
+Measles$normalized.count.bycapita <- Measles$normalized.count / Measles$population
+Measles
+plot(normalized.count.bycapita ~ year, data=Measles)
+```
+
+Here we can see that even when normalized by population, some areas go hit more than others.
+Do more densley populated areas get sick more?
+
+```{r}
+Measles[order(Measles$normalized.count.bycapita),]
+```
+
+What do we do with states that barely reported?
+Do I want to show overall counts for a year or the per capita counts?
+
+Story - the introduction of vaccines
+
+Make a combined dataset will all the counts of a disease per year as first figure.
+
+All diseases
+```{r, fig.width=10, fig.height=6}
+diseases$disease <- factor(diseases$disease, levels = c("Smallpox", "Measles", "Pertussis", "Hepatitis A", "Rubella", "Mumps"))
+diseases$normalized.count <- diseases$count / diseases$weeks_reporting * 52
+diseases$percentpop <- diseases$normalized.count/diseases$population
+```
+
+```{r, fig.width=10, fig.height=6}
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2)
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2) + facet_grid(disease ~ .)
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = F) + facet_wrap(~ disease, scales="free")
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_boxplot(aes(group=factor(year)),show.legend = F, size=0.2, outlier.size = 0.1) + facet_wrap(~ disease, scales="free")
+```
+
+If I want to look only at the progression of the disease compared to when the vaccine was released, I want to normalize the values by the maximum of each disease.
+
+```{r}
+maximums <- aggregate(normalized.count~disease, diseases, FUN=max)
+diseases$maximums <- maximums[diseases$disease, "normalized.count"]
+diseases$disease.proportion <- diseases$normalized.count/diseases$maximums
+
+ggplot(na.omit(diseases), aes(x=year, y=disease.proportion, color=disease)) + geom_point(alpha=0.1) + geom_smooth(se=FALSE)
+```
+```{r, fig.width=6, fig.height=4}
+diseasesbyyear <- na.omit(diseases) %>%
+  group_by(disease,year) %>%
+  summarize(totalcount = sum(normalized.count, na.rm = TRUE))
+
+maximums2 <- aggregate(totalcount~disease, diseasesbyyear, FUN=max)
+diseasesbyyear$maximums <- maximums2[diseasesbyyear$disease, "totalcount"]
+
+diseasesbyyear$percentofhighest <- diseasesbyyear$totalcount/diseasesbyyear$maximums
+
+ggplot(na.omit(diseasesbyyear), aes(x=year, y=percentofhighest, color=disease)) + geom_point(alpha=0.4, aes(size=totalcount)) + geom_smooth(se=FALSE, size=0.4)
+```
+```{r}
+alldiseases <- diseases %>%
+  group_by(year) %>%
+  summarize(total = sum(count, na.rm = TRUE))
+
+ggplot(na.omit(alldiseases), aes(x=year, y=total)) + geom_point(alpha=0.4) + geom_smooth(se=FALSE, size=0.2)
+```
+
+
+```{r}
+hepA.vaccine <- 1995          #first approved in US
+measles.vaccine <- 1963
+mumps.vaccine <- 1948         #first licensed, however short term effectiveness, improved in the 1960s
+pertussis.vaccine <- 1926
+rubella.vaccine <- 1969
+smallpox.vaccine <- 1796
+
+vline.data <- data.frame(disease=c("Hepatitis A", "Measles", "Mumps", "Pertussis", "Rubella", "Smallpox"), vl=c(hepA.vaccine, measles.vaccine, mumps.vaccine, pertussis.vaccine, rubella.vaccine, smallpox.vaccine))
+ggplot(na.omit(diseases), aes(x=year, y=disease.proportion, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data, show.legend =FALSE) + facet_grid(disease ~ .)
+
+ggplot(na.omit(diseases), aes(x=year, y=disease.proportion, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data, show.legend =FALSE) + facet_wrap(~disease, scales = "free")
+
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_boxplot(aes(group=factor(year)),show.legend = F, size=0.2, outlier.size = 0.05) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data, show.legend =FALSE) + facet_wrap(~disease, scales = "free")
+
+ggplot(na.omit(diseases), aes(x=year, y=percentpop, color=disease)) + geom_boxplot(aes(group=factor(year)),show.legend = F, size=0.2, outlier.size = 0.05) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data, show.legend =FALSE) + facet_wrap(~disease, scales = "free")
+```
+```{r, fig.width=12, fig.height=4}
+colors <- scales::hue_pal()(6)
+colordf <- data.frame(disease=levels(diseases$disease), color=colors)
+colorlist <- colordf[which(colordf$disease %in% c("Hepatitis A", "Measles", "Rubella")),"color"]
+colorlist <- as.character(colorlist)
+
+ggplot(na.omit(diseases[which(diseases$disease %in% c("Hepatitis A", "Measles", "Rubella")),]), aes(x=year, y=normalized.count, color=disease)) + geom_boxplot(aes(group=factor(year), fill=year), show.legend = TRUE, size=0.2, outlier.size = 0.1, outlier.alpha = 0.7) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A", "Measles", "Rubella")),], show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + scale_color_manual(values = colorlist)
+```
+
+
+
+
+```{r, fig.width=12, fig.height=4}
+require(gridExtra)
+meas<- ggplot(na.omit(diseases[which(diseases$disease =="Measles"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(fill=factor(year)), color="#B79F00", show.legend = F, size=0.2, outlier.shape=NA, alpha=0.3) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Measles")),], show.legend =FALSE, linetype=2, size=.3, color="#B79F00") + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,0.0175))
+
+hep<-ggplot(na.omit(diseases[which(diseases$disease =="Hepatitis A"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(fill=factor(year)), color="#00BFC4", show.legend = F, size=0.2, outlier.shape=NA, alpha=0.3) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A")),], color="#00BFC4", show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free")+ coord_cartesian(ylim=c(0,0.0007))
+
+rub<-ggplot(na.omit(diseases[which(diseases$disease =="Rubella"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(fill=factor(year)), color="#619CFF", show.legend = F, size=0.2, outlier.shape=NA, alpha=0.3) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Rubella")),], color="#619CFF", show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,0.0013))
+grid.arrange(meas,hep,rub, nrow=1)
+```
+
+Fill with mean for that year
+```{r, fig.width=12, fig.height=4}
+meandiseases <- diseases
+newmean <- meandiseases %>%
+  group_by(disease,year)%>%
+  mutate(mean=round(mean(percentpop, na.rm = TRUE), digits=4))
+newmean <- as.data.frame(newmean)
+
+ggplot(na.omit(newmean[which(newmean$disease %in% c("Hepatitis A", "Measles", "Rubella")),]), aes(x=year, y=normalized.count, color=disease)) + geom_boxplot(aes(group=factor(year), fill=mean), show.legend = TRUE, size=0.2, outlier.size = 0.1, outlier.alpha = 0.7) + scale_colour_gradient() + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A", "Measles", "Rubella")),], show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + scale_color_manual(values = colorlist) 
+```
+
+```{r, fig.width=12, fig.height=4}
+require(gridExtra)
+meas<- ggplot(na.omit(newmean[which(newmean$disease =="Measles"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(group=factor(year), fill=mean), color="darkgray", show.legend = F, size=0.1, outlier.shape=NA) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Measles")),], show.legend =FALSE, linetype=2, size=.3, color="#B79F00") + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,0.0175)) + theme(legend.position = "bottom")
+
+hep<-ggplot(na.omit(newmean[which(newmean$disease =="Hepatitis A"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(group=factor(year), fill=mean), color="darkgray", show.legend = F, size=0.1, outlier.shape=NA) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A")),], color="#00BFC4", show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free")+ coord_cartesian(ylim=c(0,0.0007))
+
+rub<-ggplot(na.omit(newmean[which(newmean$disease =="Rubella"),]), aes(x=year, y=percentpop)) + geom_boxplot(aes(group=factor(year), fill=mean), color="darkgray", show.legend = F, size=0.1, outlier.shape=NA) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Rubella")),], color="#619CFF", show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,0.0013))
+grid.arrange(meas,hep,rub, nrow=1)
+```
+
+
+```{r, fig.width=10, fig.height=4}
+levels <- c(seq(1919,2010,10), Inf)
+labels <- seq(1920,2010,10)
+factorbydecades <- diseases %>%
+  mutate(decade = cut(year, levels, labels = labels))
+  
+ggplot(na.omit(factorbydecades[which(factorbydecades$disease %in% c("Hepatitis A", "Measles", "Rubella")),]), aes(x=decade, y=normalized.count, color=disease)) + geom_violin(aes(fill=factor(decade)), show.legend = F, alpha=0.3) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A", "Measles", "Rubella")),], show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + scale_color_manual(values = colorlist)
+
+ggplot(na.omit(factorbydecades[which(factorbydecades$disease %in% c("Hepatitis A", "Measles", "Rubella")),]), aes(x=decade, y=normalized.count, color=disease)) + geom_boxplot(aes(fill=factor(decade)), show.legend = F, alpha=0.3, size=0.3, outlier.size=.4) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A", "Measles", "Rubella")),], show.legend =FALSE, linetype=2, size=.3) + facet_wrap(~disease, scales = "free") + scale_color_manual(values = colorlist)
+```
+
+```{r}
+ggplot(na.omit(diseases), aes(x=year, y=disease.proportion, color=disease)) + 
+  geom_point(alpha=0.2) + 
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[5]) 
+  #+  geom_vline(xintercept = smallpox.vaccine, linetype="dashed", color = colors[6])
+```
+
+```{r}
+ggplot(na.omit(diseases), aes(x=year, y=disease.proportion, color=disease)) + 
+  geom_boxplot(aes(group=interaction(disease,factor(year))), show.legend = F, size=0.2, outlier.size = 0.1) +
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[5]) 
+  #+  geom_vline(xintercept = smallpox.vaccine, linetype="dashed", color = colors[6])
+```
+
+
+In 1930, Arizona, Utah, North Dakoata and Minnesota prohibited compulsory vaccination. Whereas, 10 states infant vaccination was compulsory for public schools including washington DC and Massachussets.
+
+```{r}
+ggplot(na.omit(diseases[which(diseases$state %in% c("Arizona", "Utah", "North Dakota", "Minnesota")),]), aes(x=year, y=disease.proportion, color=disease)) + 
+  geom_point(alpha=0.2) + 
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = polio.vaccine, linetype="dashed", color = colors[5]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[6]) 
+
+ggplot(na.omit(diseases[which(diseases$state %in% c("Massachusetts")),]), aes(x=year, y=disease.proportion, color=disease)) + 
+  geom_point(alpha=0.2) + 
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = polio.vaccine, linetype="dashed", color = colors[5]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[6]) 
+```
+
+
+Hmm what happens if we group all the states
+```{r}
+us.diseases <- diseases %>%
+  group_by(disease,year) %>%
+  summarize(normalized.counts=sum(normalized.count, na.rm=T))
+us.diseases
+```
+```{r}
+ggplot(us.diseases, aes(x=year, y=normalized.counts, color=disease)) + 
+  geom_point(alpha=0.5) + 
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = polio.vaccine, linetype="dashed", color = colors[5]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[6]) 
+```
+
+What about converting these to a proportion to emphasize vaccine effect (similar to plotting separately)
+```{r}
+maximums2 <- aggregate(normalized.counts~disease, us.diseases, FUN=max)
+us.diseases$maximums <- maximums2[us.diseases$disease, "normalized.counts"]
+us.diseases$disease.proportion <- us.diseases$normalized.counts/us.diseases$maximums
+```
+
+```{r}
+ggplot(us.diseases, aes(x=year, y=disease.proportion, color=disease)) + 
+  geom_point(alpha=0.5) + 
+  geom_vline(xintercept = hepA.vaccine, linetype="dashed", color = colors[1]) + 
+  geom_vline(xintercept = measles.vaccine, linetype="dashed", color = colors[2]) +
+  geom_vline(xintercept = mumps.vaccine, linetype="dashed", color = colors[3]) +
+  geom_vline(xintercept = pertussis.vaccine, linetype="dashed", color = colors[4]) +
+  geom_vline(xintercept = polio.vaccine, linetype="dashed", color = colors[5]) +
+  geom_vline(xintercept = rubella.vaccine, linetype="dashed", color = colors[6]) 
+```
+
+Some of these vaccines were created before we have data for. Let's look at individual plots of those diseases that we have data before the vaccine was created
+
+I want to try to fit a piecewise linear model on Hepatitis A.
+
+```{r}
+HepAPW <- lm(normalized.count ~ year, data=diseases[which(diseases$disease == "Hepatitis A"),])
+segmented.mod <- segmented(HepAPW, seg.Z = ~year, psi=hepA.vaccine)
+plot(diseases[which(diseases$disease == "Hepatitis A"),"year"], diseases[which(diseases$disease == "Hepatitis A"),"normalized.count"])
+plot(segmented.mod, add=T)
+```
+
+that estimates the break way to early
+```{r}
+library(splines)
+hepplot <- ggplot(na.omit(diseases[which(diseases$disease == "Hepatitis A"),]), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease == "Hepatitis A"),], show.legend =FALSE)
+
+lm1 <- lm(normalized.count ~ bs(year, df = NULL, knots  = hepA.vaccine, degree=1), data=diseases[which(diseases$disease == "Hepatitis A"),])
+# create predictions with this lm
+newdat <- data.frame(year = seq(from = min(diseases[which(diseases$disease == "Hepatitis A"),"year"]), to = max(diseases[which(diseases$disease == "Hepatitis A"),"year"]), by = 1))
+newdat$normalized.count <- predict(lm1, newdata = newdat)
+newdat$disease <- "Hepatitis A"
+
+# add to the plot
+hepplot + geom_line(data=newdat, aes(year, normalized.count), color="black", linetype=3)
+```
+
+```{r}
+diseaseofinterest <- "Measles"
+colorofinterest <- colors[2]
+vaccine <- measles.vaccine
+newplot <- ggplot(na.omit(diseases[which(diseases$disease == diseaseofinterest),]), aes(x=year, y=normalized.count)) + geom_point(alpha=0.2, show.legend = FALSE, color=colorofinterest) + geom_vline(aes(xintercept=vl), data=vline.data[which(vline.data$disease == diseaseofinterest),], show.legend =FALSE, color=colorofinterest)
+
+lm1 <- lm(normalized.count ~ bs(year, df = NULL, knots  = vaccine, degree=1), data=diseases[which(diseases$disease == diseaseofinterest),])
+# create predictions with this lm
+newdat <- data.frame(year = seq(from = min(diseases[which(diseases$disease == diseaseofinterest),"year"]), to = max(diseases[which(diseases$disease == diseaseofinterest),"year"]), by = 1))
+newdat$normalized.count <- predict(lm1, newdata = newdat)
+newdat$disease <- diseaseofinterest
+
+# add to the plot
+newplot + geom_line(data=newdat, aes(year, normalized.count), color="black", linetype=3)
+```
+
+Show it on all of them
+```{r}
+piecewisevals <- function(vax, doi){
+  newlm <- lm(normalized.count ~ bs(year, df = NULL, knots  = vax, degree=1), data=diseases[which(diseases$disease == doi),])
+  newdat <- data.frame(year = seq(from = min(diseases[which(diseases$disease == doi),"year"]), to = max(diseases[which(diseases$disease == doi),"year"]), by = 1))
+  newdat$normalized.count <- predict(newlm, newdata = newdat)
+  newdat$disease <- doi
+  newdat
+}
+
+piecewise <- data.frame(disease=character(),
+                        year=numeric(),
+                        normalized.count=numeric())
+for (dis in levels(diseases$disease)){
+  vdate <- vline.data[which(vline.data$disease == dis),"vl"]
+  dftoadd <- piecewisevals(vdate, dis)
+  piecewise <- rbind(piecewise, dftoadd)
+}
+```
+
+```{r}
+facetedplot <- ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease != "Smallpox"),], show.legend =FALSE) + facet_grid(disease~., scales="free")
+facetedplot + geom_line(data=piecewise, aes(year, normalized.count), color = "black", linetype=3)
+```
+Let's look at disease progression 10 years before the vaccine and 10 years after
+```{r}
+piecewisevals2 <- function(vax, doi){
+  newlm <- lm(normalized.count ~ bs(year, df = NULL, knots  = vax, degree=1), data=diseases[which(diseases$disease == doi & diseases$year > vax-10 & diseases$year <vax+10),])
+  newdat <- data.frame(year = seq(from = vax-10, to = vax+10, by = 1))
+  newdat
+  newdat$normalized.count <- predict(newlm, newdata = newdat)
+  newdat$disease <- doi
+  newdat
+}
+
+piecewise2 <- data.frame(disease=character(),
+                        year=numeric(),
+                        normalized.count=numeric())
+for (dis in unique(diseases[which(diseases$disease %in% list("Hepatitis A", "Measles", "Rubella")),"disease"])){
+  vdate <- vline.data[which(vline.data$disease == dis),"vl"]
+  dftoadd <- piecewisevals2(vdate, dis)
+  piecewise2 <- rbind(piecewise2, dftoadd)
+}
+```
+
+```{r}
+facetedplot <- ggplot(na.omit(diseases[which(diseases$disease %in% list("Hepatitis A", "Measles", "Rubella")),]), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease != "Smallpox" & vline.data$disease != "Pertussis" & vline.data$disease != "Mumps"),], show.legend =FALSE) + facet_grid(disease~., scales="free")
+facetedplot + geom_line(data=piecewise2, aes(year, normalized.count), color = "black", linetype=3)
+```
+
+Let's subset the data for the 10 years before and after:
+```{r}
+diseasesofinterest = c("Hepatitis A", "Measles", "Rubella")
+tmpdf <- diseases[0,]
+for (disease in diseasesofinterest){
+  vaccineyear <- vline.data[which(vline.data$disease == disease),"vl"]
+  tmpdf2 <- diseases[which(diseases$disease == disease & diseases$year > vaccineyear-10 & diseases$year < vaccineyear+10),]
+  tmpdf <- rbind(tmpdf, tmpdf2)
+}
+tmpdf$disease <- factor(tmpdf$disease)
+vaccinediseases <- tmpdf
+vaccinediseases$vaccineyear <- vline.data$vl[match(vaccinediseases$disease, vline.data$disease)]
+vaccinediseases$yearssincevaccine <- vaccinediseases$year - vaccinediseases$vaccineyear
+```
+
+check it out
+```{r}
+ggplot(na.omit(vaccinediseases), aes(x=yearssincevaccine, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=0, color=disease), data=vline.data[which(vline.data$disease %in% diseasesofinterest),], show.legend =FALSE) + facet_grid(disease~., scales="free")
+```
+
+Okay add the piecewise
+```{r}
+piecewisevals3 <- function(vax, doi){
+  newlm <- lm(normalized.count ~ bs(year, df = NULL, knots  = vax, degree=1), data=vaccinediseases[which(vaccinediseases$disease == doi),])
+  newdat <- data.frame(year = seq(from = min(vaccinediseases[which(vaccinediseases$disease == doi),"year"]), to = max(vaccinediseases[which(vaccinediseases$disease == doi),"year"]), by = 1))
+  newdat$normalized.count <- predict(newlm, newdata = newdat)
+  newdat$disease <- doi
+  newdat
+}
+
+piecewise3 <- data.frame(disease=character(),
+                        year=numeric(),
+                        normalized.count=numeric())
+for (dis in levels(vaccinediseases$disease)){
+  vdate <- vline.data[which(vline.data$disease == dis),"vl"]
+  dftoadd <- piecewisevals3(vdate, dis)
+  piecewise3 <- rbind(piecewise3, dftoadd)
+}
+```
+
+```{r, fig.width=8, fig.height=4}
+ggplot(na.omit(vaccinediseases), aes(x=year, y=normalized.count, color=disease)) + geom_point(alpha=0.2, show.legend = FALSE) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% diseasesofinterest),], show.legend =FALSE, linetype=3) + facet_wrap(~disease, scales="free") + geom_line(data=piecewise3, aes(year, normalized.count), color = "black")
+```
+
+How does boxplots look?
+```{r, fig.width=12, fig.height=4}
+ggplot(na.omit(vaccinediseases), aes(x=year, y=normalized.count, color=disease)) + geom_violin(aes(fill=factor(year)),size=.2,show.legend = FALSE, color="darkgray") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% diseasesofinterest),], show.legend =FALSE, linetype="dotdash") + facet_wrap(~disease, scales="free") + geom_line(data=piecewise3, aes(year, normalized.count, color=disease), show.legend = F)+ scale_color_manual(values = colorlist)
+```
+
+to color by the mean
+```{r}
+vaccinediseases <- vaccinediseases %>%
+  group_by(disease,year)%>%
+  mutate(mean=round(mean(normalized.count, na.rm = TRUE)))
+vaccinediseases <- as.data.frame(vaccinediseases)
+```
+
+```{r, fig.width=12, fig.height=4}
+require(gridExtra)
+meas<- ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Measles"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean), trim=TRUE, color="#B79F00", show.legend = F, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Measles")),], show.legend =FALSE, linetype=2, size=.3, color="black") + geom_line(data=piecewise3[which(piecewise3$disease == "Measles"),], aes(year, normalized.count), color="#B79F00", show.legend = F) + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,15000)) + theme(legend.position = "bottom")
+
+hep<-ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Hepatitis A"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean), trim=TRUE, color="#00BFC4", show.legend = F, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A")),], color="black", show.legend =FALSE, linetype=2, size=.3) + geom_line(data=piecewise3[which(piecewise3$disease == "Hepatitis A"),], aes(year, normalized.count), color="#00BFC4", show.legend = F) + facet_wrap(~disease, scales = "free") + facet_wrap(~disease, scales = "free")+ coord_cartesian(ylim=c(0,600))+ ylab(NULL)
+
+rub<-ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Rubella"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean, trim=TRUE), color="#619CFF", show.legend = F, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Rubella")),], color="black", show.legend =FALSE, linetype=2, size=.3) + geom_line(data=piecewise3[which(piecewise3$disease == "Rubella"),], aes(year, normalized.count), color="#619CFF", show.legend = F) + facet_wrap(~disease, scales = "free") + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,1250)) + ylab(NULL)
+grid.arrange(meas,hep,rub, nrow=1)
+```

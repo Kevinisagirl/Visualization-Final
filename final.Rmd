@@ -1,0 +1,147 @@
+---
+output:
+  html_document:
+    df_print: paged
+---
+###Disease Prevalence and Vaccination in the United States
+
+  
+  
+```{r echo=FALSE, include=FALSE} 
+library(dslabs)
+library(ggplot2)
+library(dplyr)
+library(segmented)
+library(gridExtra)
+library(splines)
+library(knitr)
+library(ggthemes)
+opts_chunk$set(echo=FALSE)
+opts_chunk$set(message=FALSE)
+opts_chunk$set(warning=FALSE)
+options(scipen = 999)
+```
+
+```{r}
+diseases <- get("us_contagious_diseases")
+murders <- get("murders")
+```
+
+```{r}
+diseases[diseases$weeks_reporting == 0, c("weeks_reporting", "count")] <- NA
+diseases <- diseases[which(diseases$disease != "Polio"),]
+diseases$disease <- factor(diseases$disease)
+diseases$disease <- factor(diseases$disease, levels = c("Smallpox", "Measles", "Pertussis", "Hepatitis A", "Rubella", "Mumps"))
+diseases$normalized.count <- diseases$count / diseases$weeks_reporting * 52
+diseases$percentpop <- diseases$normalized.count/diseases$population
+```
+  
+The diseases recorded in this dataset reveal total reported disease counts have gone down in the United States. 
+  
+```{r fig.align="center", fig.width=8, fig.height=4}
+alldiseases <- diseases %>%
+  group_by(year) %>%
+  summarize(total = sum(count, na.rm = TRUE))
+
+mytheme <- theme_minimal() + theme(plot.title = element_text(hjust=0.5)) + theme(panel.grid = element_blank(), axis.ticks = element_line(color="black"), axis.line = element_line(color="black", size=0.2))
+
+ggplot(na.omit(alldiseases), aes(x=year, y=total)) + geom_point(shape=21, color="black") + geom_smooth(se=FALSE, size=0.2, color="black") + mytheme + ylab("Total Reported Disease Counts") + xlab("Year") + ggtitle("Reported Incidences of Disease in the United States") + labs(caption="Source: Typho Project. Diseases: Hepatitis A, Measles, Mumps, Pertussis, Rubells, and Smallpox")
+```
+
+This trend is seen for every disease in the dataset.
+
+
+```{r, fig.width=8, fig.height=4, fig.align="center"}
+diseasesbyyear <- na.omit(diseases) %>%
+  group_by(disease,year) %>%
+  summarize(totalcount = sum(normalized.count, na.rm = TRUE))
+
+maximums2 <- aggregate(totalcount~disease, diseasesbyyear, FUN=max)
+diseasesbyyear$maximums <- maximums2[diseasesbyyear$disease, "totalcount"]
+
+diseasesbyyear$percentofhighest <- diseasesbyyear$totalcount/diseasesbyyear$maximums
+
+ggplot(na.omit(diseasesbyyear), aes(x=year, y=percentofhighest, color=disease)) + geom_point(alpha=0.4, aes(size=totalcount)) + geom_smooth(se=FALSE, size=0.4) + mytheme + ylab("Prevalence as a Percent of the Highest Year") + xlab("Year") + ggtitle("Disease Progression over Time in the United States") + labs(color="Disease", size="Yearly Count") + scale_y_continuous(labels = scales::percent)
+```
+Disease counts per year per state were adjusted to reflect 52 weeks of data using the average count per reported week. These adjusted counts were totaled for each year and disease. Those totals were normalized as a percent of the highest yearly total for a particular disease.  
+  
+
+There are several factors that could contribute to decreasing disease prevalence in the United States (e.g. education, sanitation). Here we will focus on the introduction of vaccines and their effect on disease prevalence. A vaccine is administered to provide immunity to a particular disease. The first vaccine was created in the late 18th century against Smallpox. The dates of vaccine creation for each disease are plotted with the adjusted yearly counts for each state:  
+  
+```{r fig.align="center", fig.width=12, fig.height=8}
+hepA.vaccine <- 1995          #first approved in US
+measles.vaccine <- 1963
+mumps.vaccine <- 1948         #first licensed, however short term effectiveness, improved in the 1960s
+pertussis.vaccine <- 1926
+rubella.vaccine <- 1969
+smallpox.vaccine <- 1796
+
+vline.data <- data.frame(disease=c("Hepatitis A", "Measles", "Mumps", "Pertussis", "Rubella", "Smallpox"), vl=c(hepA.vaccine, measles.vaccine, mumps.vaccine, pertussis.vaccine, rubella.vaccine, smallpox.vaccine))
+
+ggplot(na.omit(diseases), aes(x=year, y=normalized.count, color=disease)) + geom_boxplot(aes(group=factor(year)),show.legend = F, size=0.2, outlier.shape = 21, outlier.size = 0.4) + facet_wrap(~ disease, scales="free") + geom_vline(aes(xintercept=vl, color=disease), data=vline.data, show.legend =FALSE, size=0.5, linetype=2) + facet_wrap(~disease, scales = "free") + mytheme + ylab("Adjusted Yearly Disease Counts by State") + xlab("Year") + ggtitle("Vaccine Creation and Disease Progression in the United States")
+```
+
+
+```{r, fig.width=12, fig.height=4, fig.align="center"}
+meandiseases <- diseases
+newmean <- meandiseases %>%
+  group_by(disease,year)%>%
+  mutate(mean=round(mean(percentpop, na.rm = TRUE), digits=4))
+newmean <- as.data.frame(newmean)
+```
+
+```{r fig.align="center"}
+diseasesofinterest = c("Hepatitis A", "Measles", "Rubella")
+tmpdf <- diseases[0,]
+for (disease in diseasesofinterest){
+  vaccineyear <- vline.data[which(vline.data$disease == disease),"vl"]
+  tmpdf2 <- diseases[which(diseases$disease == disease & diseases$year > vaccineyear-10 & diseases$year < vaccineyear+10),]
+  tmpdf <- rbind(tmpdf, tmpdf2)
+}
+tmpdf$disease <- factor(tmpdf$disease)
+vaccinediseases <- tmpdf
+vaccinediseases$vaccineyear <- vline.data$vl[match(vaccinediseases$disease, vline.data$disease)]
+vaccinediseases$yearssincevaccine <- vaccinediseases$year - vaccinediseases$vaccineyear
+```
+
+
+```{r}
+piecewisevals3 <- function(vax, doi){
+  newlm <- lm(normalized.count ~ bs(year, df = NULL, knots  = vax, degree=1), data=vaccinediseases[which(vaccinediseases$disease == doi),])
+  newdat <- data.frame(year = seq(from = min(vaccinediseases[which(vaccinediseases$disease == doi),"year"]), to = max(vaccinediseases[which(vaccinediseases$disease == doi),"year"]), by = 1))
+  newdat$normalized.count <- predict(newlm, newdata = newdat)
+  newdat$disease <- doi
+  newdat
+}
+
+piecewise3 <- data.frame(disease=character(),
+                        year=numeric(),
+                        normalized.count=numeric())
+for (dis in levels(vaccinediseases$disease)){
+  vdate <- vline.data[which(vline.data$disease == dis),"vl"]
+  dftoadd <- piecewisevals3(vdate, dis)
+  piecewise3 <- rbind(piecewise3, dftoadd)
+}
+```
+
+```{r}
+vaccinediseases <- vaccinediseases %>%
+  group_by(disease,year)%>%
+  mutate(mean=round(mean(normalized.count, na.rm = TRUE)))
+vaccinediseases <- as.data.frame(vaccinediseases)
+```
+
+In order to investigate the potential effect of vaccination on disease prevalence, we look at diseases for which we have data before and after the vaccine creation (Measles, Hepatitis A, and Rubella). A piecewise linear regression of 10 years before and after vaccine creation reveals a potential effect of vaccination on yearly disease prevalence. The 20 year window attempts to control for other factors that may cause the overall downward trend in disease prevalence.  Also, note the increasing density of lower counts (wider bottoms of the violin plots) and the darkening color indicating a lower mean disease count after the vaccine creation. All reflect the decreasing disease prevalence for each disease in the years following the vaccine creation. 
+  
+```{r, fig.width=12, fig.height=4}
+specialtheme <- theme(legend.position = c(1,0.6), legend.justification = c(1,0), legend.background = element_rect(colour=NA, fill="white"), legend.key.size = unit(0.75, "line"), legend.title=element_text(size=7), legend.title.align=0.5, legend.text = element_text(size=7))
+require(gridExtra)
+meas<- ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Measles"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean), color="gray", show.legend = TRUE, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Measles")),], show.legend =FALSE, linetype=2, size=.3, color="#B79F00") + geom_line(data=piecewise3[which(piecewise3$disease == "Measles"),], aes(year, normalized.count), color="#B79F00", show.legend = F, size=0.3) + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,15000)) + mytheme + specialtheme + ylab("Adjusted Yearly Disease Counts by State") + xlab(" ") + labs(fill="Mean\nYearly\nCount")
+
+hep<-ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Hepatitis A"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean), color="gray", show.legend = TRUE, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Hepatitis A")),], color="#00BFC4", show.legend =FALSE, linetype=2, size=.3) + geom_line(data=piecewise3[which(piecewise3$disease == "Hepatitis A"),], aes(year, normalized.count), color="#00BFC4", show.legend = F, size=0.3) + facet_wrap(~disease, scales = "free") + facet_wrap(~disease, scales = "free")+ coord_cartesian(ylim=c(0,600))+ ylab(NULL) + mytheme + specialtheme + xlab("Year") + theme(panel.grid = element_blank(), axis.ticks = element_line(color="black")) + labs(fill="Mean\nYearly\nCount") + scale_fill_gradient(breaks=c(300,500))
+
+rub<-ggplot(na.omit(vaccinediseases[which(vaccinediseases$disease =="Rubella"),]), aes(x=year, y=normalized.count)) + geom_violin(aes(group=factor(year), fill=mean, trim=TRUE), color="gray", show.legend = TRUE, size=.3) + geom_vline(aes(xintercept=vl, color=disease), data=vline.data[which(vline.data$disease %in% c("Rubella")),], color="#619CFF", show.legend =FALSE, linetype=2, size=.3) + geom_line(data=piecewise3[which(piecewise3$disease == "Rubella"),], aes(year, normalized.count), color="#619CFF", show.legend = F, size=0.3) + facet_wrap(~disease, scales = "free") + coord_cartesian(ylim=c(0,1250)) + ylab(NULL) + mytheme  + specialtheme + xlab(" ") + theme(panel.grid = element_blank(), axis.ticks = element_line(color="black")) + labs(fill="Mean\nYearly\nCount") + scale_fill_gradient(breaks=c(500,1000))
+grid.arrange(meas,hep,rub, nrow=1, top="Disease Prevalence 10 Years Before and After Vaccine Creation")
+```
+
+Thus, it appears the creation of a vaccine for a particular disease may lead to a decrease in disease prevalence. 
